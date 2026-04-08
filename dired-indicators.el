@@ -44,14 +44,15 @@
 
 (defvar dired-indicators-mode nil)
 
-(defvar dired-indicators-mode-line
-  '(:eval dired-indicators--mode-line-text)
-  "Mode line construct that displays Dired indicators.")
-
 (defvar-local dired-indicators--mode-line-text nil
   "Current Dired indicator text for the mode line.")
 
-(put 'dired-indicators-mode-line 'risky-local-variable t)
+(defconst dired-indicators--mode-line-construct
+  '(:eval (dired-indicators--mode-line-string))
+  "Mode line construct installed by `dired-indicators-mode'.")
+
+(defvar-local dired-indicators--mode-line-format-was-local nil
+  "Whether `mode-line-format' was buffer-local before mode activation.")
 
 (defun dired-indicators--current-entry-index (regexp)
   "Return the 1-based index of the current line matching REGEXP."
@@ -70,7 +71,7 @@
   (let ((count (count-matches regexp (point-min) (point-max))))
     (unless (zerop count)
       (propertize
-       (format " %s%d%s"
+       (format "%s%d%s"
                (let ((index (dired-indicators--current-entry-index regexp)))
                  (if index
                      (format "%d/" index)
@@ -78,6 +79,60 @@
                count
                suffix)
        'face face))))
+
+(defun dired-indicators--mode-line-string ()
+  "Return the current mode line string for Dired indicators."
+  (when dired-indicators--mode-line-text
+    (concat dired-indicators--mode-line-text " ")))
+
+(defun dired-indicators--mode-line-format (format)
+  "Return FORMAT as a list suitable for editing."
+  (if (listp format)
+      (copy-tree format)
+    (list format)))
+
+(defun dired-indicators--remove-construct (format)
+  "Return FORMAT without `dired-indicators--mode-line-construct'."
+  (cond
+   ((null format) nil)
+   ((equal (car format) dired-indicators--mode-line-construct)
+    (dired-indicators--remove-construct (cdr format)))
+   (t
+    (cons (car format)
+          (dired-indicators--remove-construct (cdr format))))))
+
+(defun dired-indicators--insert-before-position (format)
+  "Insert the Dired indicators construct into FORMAT before `mode-line-position'."
+  (cond
+   ((null format)
+    (list dired-indicators--mode-line-construct))
+   ((eq (car format) 'mode-line-position)
+    (cons dired-indicators--mode-line-construct format))
+   (t
+    (cons (car format)
+          (dired-indicators--insert-before-position (cdr format))))))
+
+(defun dired-indicators--install-mode-line ()
+  "Install the Dired indicators construct into the current buffer mode line."
+  (setq dired-indicators--mode-line-format-was-local
+        (local-variable-p 'mode-line-format))
+  (setq-local mode-line-format
+              (thread-last
+                mode-line-format
+                dired-indicators--mode-line-format
+                dired-indicators--remove-construct
+                dired-indicators--insert-before-position)))
+
+(defun dired-indicators--uninstall-mode-line ()
+  "Remove the Dired indicators construct from the current buffer mode line."
+  (let ((format (thread-last
+                  mode-line-format
+                  dired-indicators--mode-line-format
+                  dired-indicators--remove-construct)))
+    (if (and (not dired-indicators--mode-line-format-was-local)
+             (equal format (default-value 'mode-line-format)))
+        (kill-local-variable 'mode-line-format)
+      (setq-local mode-line-format format))))
 
 (defun dired-indicators--segments ()
   "Return the enabled indicator segments for the current Dired buffer."
@@ -98,11 +153,12 @@
   "Update Dired indicator text in the current buffer."
   (when dired-indicators-mode
     (setq dired-indicators--mode-line-text
-          (apply #'concat (dired-indicators--segments)))
+          (mapconcat #'identity (dired-indicators--segments) " "))
     (force-mode-line-update)))
 
 (defun dired-indicators--enable ()
   "Enable Dired indicator hooks in the current buffer."
+  (dired-indicators--install-mode-line)
   (add-hook 'post-command-hook #'dired-indicators-update nil 'local)
   (add-hook 'dired-after-readin-hook #'dired-indicators-update nil 'local)
   (dired-indicators-update))
@@ -112,6 +168,7 @@
   (remove-hook 'post-command-hook #'dired-indicators-update 'local)
   (remove-hook 'dired-after-readin-hook #'dired-indicators-update 'local)
   (setq dired-indicators--mode-line-text nil)
+  (dired-indicators--uninstall-mode-line)
   (force-mode-line-update))
 
 ;;;###autoload
@@ -138,4 +195,3 @@
 
 (provide 'dired-indicators)
 ;;; dired-indicators.el ends here
-
