@@ -6,6 +6,8 @@
 - files flagged for deletion
 - the current item index when point is on one of those entries
 
+![dired-indicators screenshot](screenshot.png)
+
 (kinda similar to what is available in [dired+](https://www.emacswiki.org/emacs/DiredPlus))
 
 ## Installation
